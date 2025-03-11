@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid h-100 d-flex flex-column">
+    <div class="row flex-grow-1">
+        <div class="col-md-12 d-flex flex-column">
+            <div class="card flex-grow-1">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5>Chat with Ollama</h5>
+                    <button 
+                        class="btn btn-sm btn-outline-danger"
+                        hx-get="/clear-chat"
+                        hx-target="#chat-container"
+                        hx-swap="innerHTML"
+                        hx-indicator="#loading-indicator">
+                        Clear Chat
+                    </button>
+                </div>
+                <div class="card-body d-flex flex-column">
+                    <!-- Chat messages container -->
+                    <div id="chat-container" class="flex-grow-1 overflow-auto mb-3">
+                        {% include "partials/chat_container.html" %}
+                    </div>
+                    
+                    <!-- Message input form -->
+                    <div class="message-form-container">
+                        <form id="message-form" class="d-flex flex-column">
+                            <!-- Model selector -->
+                            {% include "partials/model_selector.html" %}
+                            
+                            <div class="d-flex align-items-center">
+                                <div class="form-check form-switch me-3">
+                                    <input class="form-check-input" type="checkbox" id="stream-toggle">
+                                    <label class="form-check-label" for="stream-toggle">Stream Response</label>
+                                </div>
+                                <div id="loading-indicator" class="htmx-indicator spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
+                            
+                            <div class="input-group mt-2">
+                                <textarea 
+                                    id="message-input" 
+                                    name="message" 
+                                    class="form-control" 
+                                    placeholder="Type your message..." 
+                                    rows="2"
+                                    required></textarea>
+                                <button 
+                                    id="send-button" 
+                                    type="submit" 
+                                    class="btn btn-primary">
+                                    <i class="bi bi-send"></i> Send
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Template for streaming message -->
+<template id="streaming-template">
+    <div class="message assistant-message">
+        <div class="message-content">
+            <div class="message-text">
+                <div id="streaming-content"></div>
+                <div class="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const regularForm = document.querySelector('form[hx-post="/send-message"]');
+        const streamForm = document.getElementById('streamForm');
+        const streamToggle = document.getElementById('streamToggle');
+        
+        // Toggle between regular and streaming forms
+        streamToggle.addEventListener('change', function() {
+            if (this.checked) {
+                regularForm.classList.add('d-none');
+                streamForm.classList.remove('d-none');
+            } else {
+                regularForm.classList.remove('d-none');
+                streamForm.classList.add('d-none');
+            }
+        });
+        
+        // Set up SSE event handling for streaming responses
+        document.body.addEventListener('htmx:beforeSend', function(evt) {
+            if (evt.detail.requestConfig.path === '/send-message-stream') {
+                // Configure for SSE
+                evt.detail.xhr.setRequestHeader('Accept', 'text/event-stream');
+                
+                // Set up event listeners for the SSE events
+                evt.detail.xhr.addEventListener('message', function(e) {
+                    const data = JSON.parse(e.data);
+                    console.log('SSE message received:', data);
+                });
+            }
+        });
+        
+        // Handle SSE events
+        document.body.addEventListener('htmx:sseMessage', function(evt) {
+            const messageType = evt.detail.event;
+            const data = evt.detail.data;
+            
+            if (messageType === 'token') {
+                // Append token to the current message
+                const currentMessage = document.querySelector('.assistant-message:last-child .message-content');
+                if (currentMessage) {
+                    currentMessage.innerHTML += data;
+                    
+                    // Auto-scroll to bottom
+                    const chatContainer = document.querySelector('.chat-body');
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            }
+        });
+        
+        // Auto-scroll to bottom of chat on page load
+        const chatContainer = document.querySelector('.chat-body');
+        if (chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+<!-- Model selector dropdown -->
+<div class="model-selector mb-2">
+  <label for="model-select" class="form-label">Select Model:</label>
+  <select id="model-select" name="model" class="form-select">
+    {% for model in models %}
+      <option value="{{ model.name }}" {% if model.name == default_model %}selected{% endif %}>
+        {{ model.name }} {% if model.details and model.details.parameter_size %}({{ model.details.parameter_size }}){% endif %}
+      </option>
+    {% endfor %}
+  </select>
+</div>

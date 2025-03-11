@@ -1,0 +1,18 @@
+<div class="message assistant-message" id="message-{{ message_id }}">
+    <div class="message-content">
+        <div class="message-text">
+            <div id="streaming-content-{{ message_id }}"></div>
+            <div class="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+        <div class="message-meta">
+            <div class="message-time">{{ now() | int | strftime('%H:%M') }}</div>
+            {% if model %}
+            <div class="message-model">Model: {{ model }}</div>
+            {% endif %}
+        </div>
+    </div>
+</div>

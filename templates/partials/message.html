@@ -1,0 +1,40 @@
+{% if message.role == 'user' %}
+<div class="message user-message mb-3" id="message-{{ message.timestamp | int }}">
+    <div class="message-header">
+        <strong><i class="fas fa-user me-2"></i>You</strong>
+        {% if message.timestamp %}
+        <small class="text-muted">{{ message.timestamp | int | strftime('%H:%M:%S') }}</small>
+        {% endif %}
+    </div>
+    <div class="message-content">
+        {{ message.content }}
+    </div>
+</div>
+{% elif message.role == 'assistant' %}
+<div class="message assistant-message mb-3" id="message-{{ message.timestamp | int }}">
+    <div class="message-header">
+        <strong><i class="fas fa-robot me-2"></i>Qwen2.5-Coder</strong>
+        {% if message.timestamp %}
+        <small class="text-muted">{{ message.timestamp | int | strftime('%H:%M:%S') }}</small>
+        {% endif %}
+    </div>
+    <div class="message-content">
+        {{ message.content }}
+        {% if message.model %}
+        <div class="message-model">Model: {{ message.model }}</div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="message system-message mb-3" id="message-{{ message.timestamp | int }}">
+    <div class="message-header">
+        <strong><i class="fas fa-exclamation-circle me-2"></i>System</strong>
+        {% if message.timestamp %}
+        <small class="text-muted">{{ message.timestamp | int | strftime('%H:%M:%S') }}</small>
+        {% endif %}
+    </div>
+    <div class="message-content text-danger">
+        {{ message.content }}
+    </div>
+</div>
+{% endif %}
