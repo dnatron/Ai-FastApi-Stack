@@ -10,60 +10,64 @@ from pydantic import BaseModel
 from ollama_client import OllamaClient
 import datetime
 
-# Initialize FastAPI app
+# Inicializace FastAPI aplikace
 app = FastAPI(title="FastAPI Ollama Chat App")
 
-# Mount static files
+# Připojení statických souborů (CSS, JS, atd.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Setup templates
+# Nastavení šablon Jinja2
 templates = Jinja2Templates(directory="templates")
 
-# Add custom filters to Jinja2 environment
+# Přidání vlastního filtru do Jinja2 prostředí pro formátování časových značek
 def strftime_filter(timestamp, format_str):
     return datetime.datetime.fromtimestamp(timestamp).strftime(format_str)
 
 templates.env.filters["strftime"] = strftime_filter
 
-# Initialize Ollama client
+# Inicializace Ollama klienta pro komunikaci s LLM modely
 ollama_client = OllamaClient(base_url="http://localhost:11434")
 
-# Default model to use
+# Výchozí model, který bude použit, pokud uživatel nevybere jiný
 DEFAULT_MODEL = "llama3.2:1b"
 
-# Define message model
+# Definice datového modelu pro zprávy
 class Message(BaseModel):
-    role: str  # 'user' or 'assistant'
-    content: str
-    timestamp: Optional[float] = None
-    model: Optional[str] = None
+    role: str  # 'user' (uživatel) nebo 'assistant' (asistent)
+    content: str  # obsah zprávy
+    timestamp: Optional[float] = None  # časová značka
+    model: Optional[str] = None  # použitý LLM model
 
-# In-memory chat history storage (in a real app, you'd use a database)
+# Úložiště historie chatu v paměti (v reálné aplikaci by bylo vhodné použít databázi)
 chat_history: List[Message] = []
 
-# Dependency to get Ollama client
+# Dependency pro získání Ollama klienta a kontrolu dostupnosti služby
 async def get_ollama_client():
     try:
-        # Check if Ollama is available
+        # Kontrola, zda je Ollama dostupná
         is_available = await ollama_client.check_model_availability(DEFAULT_MODEL)
         if not is_available:
-            raise HTTPException(status_code=503, detail=f"Ollama service or model {DEFAULT_MODEL} not available")
+            raise HTTPException(status_code=503, detail=f"Ollama služba nebo model {DEFAULT_MODEL} není dostupný")
         return ollama_client
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Error connecting to Ollama: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Chyba při připojení k Ollama: {str(e)}")
 
+# Událost při vypnutí aplikace - zajistí korektní uzavření spojení
 @app.on_event("shutdown")
 async def shutdown_event():
     await ollama_client.close()
 
+# Hlavní stránka aplikace
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    # Get available models
+    # Získání dostupných modelů
     try:
         models = await ollama_client.list_available_models()
     except Exception:
+        # Pokud se nepodaří získat seznam modelů, použije se výchozí model
         models = [{"name": DEFAULT_MODEL}]
     
+    # Vykreslení šablony s daty
     return templates.TemplateResponse(
         "index.html", 
         {
@@ -75,45 +79,46 @@ async def index(request: Request):
         }
     )
 
+# Endpoint pro odeslání zprávy (bez streamování)
 @app.post("/send-message", response_class=HTMLResponse)
 async def send_message(
     request: Request,
-    message: str = Form(...),
-    model: str = Form(DEFAULT_MODEL),
-    client: OllamaClient = Depends(get_ollama_client)
+    message: str = Form(...),  # Text zprávy od uživatele
+    model: str = Form(DEFAULT_MODEL),  # Vybraný model
+    client: OllamaClient = Depends(get_ollama_client)  # Ollama klient
 ):
-    # Add user message to history
+    # Přidání zprávy uživatele do historie
     user_message = Message(role="user", content=message, timestamp=time.time())
     chat_history.append(user_message)
     
     try:
-        # Get response from Ollama
+        # Získání odpovědi z Ollama
         response = await client.generate(
             prompt=message,
             model=model,
             system="You are a helpful AI assistant. Provide clear and concise responses.",
-            temperature=0.7
+            temperature=0.7  # Parametr ovlivňující kreativitu odpovědí (vyšší = kreativnější)
         )
         
-        # Add assistant response to history
+        # Přidání odpovědi asistenta do historie
         assistant_message = Message(
             role="assistant", 
-            content=response.get("response", "Sorry, I couldn't generate a response."),
+            content=response.get("response", "Omlouvám se, nepodařilo se vygenerovat odpověď."),
             timestamp=time.time(),
             model=model
         )
         chat_history.append(assistant_message)
         
-        # Return only the new messages for HTMX to insert
+        # Vrácení pouze nových zpráv pro HTMX k vložení do DOM
         return templates.TemplateResponse(
             "partials/messages.html", 
             {"request": request, "messages": [user_message, assistant_message]}
         )
     except Exception as e:
-        # Handle errors
+        # Zpracování chyb
         error_message = Message(
             role="system", 
-            content=f"Error: {str(e)}",
+            content=f"Chyba: {str(e)}",
             timestamp=time.time()
         )
         chat_history.append(error_message)
@@ -122,6 +127,7 @@ async def send_message(
             {"request": request, "messages": [user_message, error_message]}
         )
 
+# Endpoint pro odeslání zprávy se streamováním odpovědi (postupné zobrazování)
 @app.post("/send-message-stream")
 async def send_message_stream(
     request: Request,
@@ -129,17 +135,18 @@ async def send_message_stream(
     model: str = Form(DEFAULT_MODEL),
     client: OllamaClient = Depends(get_ollama_client)
 ):
-    # Add user message to history
+    # Přidání zprávy uživatele do historie
     user_message = Message(role="user", content=message, timestamp=time.time())
     chat_history.append(user_message)
     
-    # Create a placeholder for the assistant's message
+    # Vytvoření zástupného místa pro zprávu asistenta
     assistant_message = Message(role="assistant", content="", timestamp=time.time(), model=model)
     chat_history.append(assistant_message)
     
+    # Generátor událostí pro SSE (Server-Sent Events)
     async def event_generator():
         try:
-            # Initial message with user input
+            # Počáteční událost se zprávou uživatele
             yield {
                 "event": "user_message",
                 "data": templates.TemplateResponse(
@@ -148,7 +155,7 @@ async def send_message_stream(
                 ).body.decode()
             }
             
-            # Start the assistant message container
+            # Začátek kontejneru pro zprávu asistenta
             yield {
                 "event": "assistant_start",
                 "data": templates.TemplateResponse(
@@ -157,7 +164,7 @@ async def send_message_stream(
                 ).body.decode()
             }
             
-            # Stream the response from Ollama
+            # Streamování odpovědi z Ollama (token po tokenu)
             full_response = ""
             async for token in client.generate_stream(
                 prompt=message,
@@ -171,35 +178,38 @@ async def send_message_stream(
                     "event": "token",
                     "data": token
                 }
-                await asyncio.sleep(0.01)  # Small delay for smoother streaming
+                await asyncio.sleep(0.01)  # Malé zpoždění pro plynulejší streamování
                 
-            # Final event to signal completion
+            # Konečná událost signalizující dokončení
             yield {
                 "event": "done",
                 "data": "Message complete"
             }
             
         except Exception as e:
-            # Handle errors
-            error_message = f"Error: {str(e)}"
+            # Zpracování chyb
+            error_message = f"Chyba: {str(e)}"
             yield {
                 "event": "error",
                 "data": error_message
             }
-            # Update the assistant message with the error
+            # Aktualizace zprávy asistenta s chybou
             assistant_message.content = error_message
     
+    # Vrácení EventSourceResponse pro SSE
     return EventSourceResponse(event_generator())
 
+# Endpoint pro vymazání historie chatu
 @app.get("/clear-chat", response_class=HTMLResponse)
 async def clear_chat(request: Request):
-    # Clear chat history
+    # Vymazání historie chatu
     chat_history.clear()
     return templates.TemplateResponse(
         "partials/chat_container.html", 
         {"request": request, "messages": chat_history}
     )
 
+# Endpoint pro získání seznamu dostupných modelů
 @app.get("/models", response_class=HTMLResponse)
 async def list_models(request: Request):
     try:
@@ -209,23 +219,25 @@ async def list_models(request: Request):
             {"request": request, "models": models, "default_model": DEFAULT_MODEL}
         )
     except Exception as e:
-        return HTMLResponse(f"<div class='alert alert-danger'>Error listing models: {str(e)}</div>")
+        return HTMLResponse(f"<div class='alert alert-danger'>Chyba při načítání modelů: {str(e)}</div>")
 
+# Demonstrační endpoint pro ukázku funkčnosti HTMX
 @app.get("/htmx-demo", response_class=HTMLResponse)
 async def htmx_demo(request: Request):
-    # Simulate a delay to show the loading spinner
+    # Simulace zpoždění pro zobrazení načítacího indikátoru
     time.sleep(1)
     
-    # Return HTML content that will be injected by HTMX
+    # Vrácení HTML obsahu, který bude vložen pomocí HTMX
     return """
     <div class="alert alert-success">
-        <h4 class="alert-heading">HTMX Works!</h4>
-        <p>This content was loaded dynamically using HTMX without a full page reload.</p>
+        <h4 class="alert-heading">HTMX funguje!</h4>
+        <p>Tento obsah byl načten dynamicky pomocí HTMX bez kompletního obnovení stránky.</p>
         <hr>
-        <p class="mb-0">The current time is: {}</p>
+        <p class="mb-0">Aktuální čas je: {}</p>
     </div>
     """.format(time.strftime("%H:%M:%S"))
 
+# Spuštění aplikace při přímém spuštění tohoto souboru
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)  # reload=True umožňuje automatické restartování při změnách kódu
